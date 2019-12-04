@@ -55,7 +55,7 @@ where
         match self.send(&instruction.0.to_be_bytes()) {
             Ok(_) => (),
             Err(err) => {
-                self.slave_select.set_low().unwrap();
+                self.slave_select.set_high().unwrap();
                 return Err(err);
             }
         }
@@ -67,7 +67,7 @@ where
             match self.read() {
                 Ok(val) => read_value |= (val as u32) << 8 * i,
                 Err(val) => {
-                    self.slave_select.set_low().unwrap();
+                    self.slave_select.set_high().unwrap();
                     return Err(val);
                 }
             }
@@ -197,6 +197,30 @@ where
 
         match self.read_sfr(&address) {
             Ok(val) => Ok(fifo::UserAddressRegister(val)),
+            Err(err) => Err(Error::SPI(err)),
+        }
+    }
+
+    pub fn write_fifo_user_address<F>(
+        &mut self,
+        fifo_number: u8,
+        f: F,
+    ) -> Result<(), Error<T::Error, u8>>
+    where
+        F: FnOnce(&mut fifo::UserAddressRegister) -> fifo::UserAddressRegister,
+    {
+        let address = match fifo::get_fifo_status_address(fifo_number) {
+            Ok(val) => val,
+            Err(err) => return Err(Error::Other(err)),
+        };
+
+        let mut register = match self.read_sfr(&address) {
+            Ok(val) => fifo::UserAddressRegister(val),
+            Err(err) => return Err(Error::SPI(err)),
+        };
+
+        match self.write_sfr(&address, f(&mut register).0) {
+            Ok(_) => Ok(()),
             Err(err) => Err(Error::SPI(err)),
         }
     }
