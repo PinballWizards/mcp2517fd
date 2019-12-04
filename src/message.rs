@@ -1,8 +1,14 @@
+type WordSize = u8;
+
+pub const TX_HEADER_SIZE: usize = 8;
+pub const RX_HEADER_SIZE: usize = 12;
+pub const MAX_BUFFER_SIZE: usize = 48;
+
 const MESSAGE_IDENTIFIER_MASK: u16 = 0b0000_0111_1111_1111;
 pub type MessageIdentifier = u16;
 
 bitfield! {
-    pub struct TransmitMessageHeader([u8]);
+    pub struct TxHeader([WordSize]);
     impl Debug;
     u8;
     // T0
@@ -19,31 +25,27 @@ bitfield! {
     pub sequence, set_sequence: 47, 41;
 }
 
-impl TransmitMessageHeader<[u8; 2]> {
-    /*pub fn new(identifier: impl CustomMessage) -> Self {
-        let mut msg = TransmitMessageHeader([0; 2]);
-        //msg.set_standard_identifier(identifier::IDENTIFIER & MESSAGE_IDENTIFIER_MASK);
-        msg
-    }*/
+pub struct TransmitMessage {
+    header: TxHeader<[WordSize; TX_HEADER_SIZE]>,
+    data: [WordSize; MAX_BUFFER_SIZE],
 }
-
-pub struct TransmitMessage<'d> {
-    header: TransmitMessageHeader<[u8; 2]>,
-    data: &'d [u8],
-}
-impl<'d> TransmitMessage<'d> {
-    pub fn new(identifier: MessageIdentifier, data: &'d [u8]) -> Self {
-        let mut header = TransmitMessageHeader([0; 2]);
+impl TransmitMessage {
+    pub fn new(identifier: MessageIdentifier, data: [WordSize; MAX_BUFFER_SIZE]) -> Self {
+        let mut header = TxHeader([0; TX_HEADER_SIZE]);
         header.set_standard_identifier(identifier & MESSAGE_IDENTIFIER_MASK);
-        TransmitMessage::<'d> {
+        TransmitMessage {
             header: header,
             data: data,
         }
     }
+
+    pub fn bytes(self) -> (usize, [WordSize; TX_HEADER_SIZE + MAX_BUFFER_SIZE]) {
+        (0, [0u8; TX_HEADER_SIZE + MAX_BUFFER_SIZE])
+    }
 }
 
 bitfield! {
-    pub struct ReceiveMessageHeader([u8]);
+    pub struct RxHeader([WordSize]);
     impl Debug;
     u8;
     // T0
@@ -62,10 +64,8 @@ bitfield! {
     pub u32, timestamp, _: 95, 64;
 }
 
-impl ReceiveMessageHeader<[u8; 3]> {
-    /*pub fn new(identifier: impl CustomMessage) -> Self {
-        let mut msg = ReceiveMessageHeader([0; 3]);
-        //msg.set_standard_identifier((identifier as u16) & MESSAGE_IDENTIFIER_MASK);
-        msg
-    }*/
+pub struct ReceiveMessage {
+    header: RxHeader<[WordSize; RX_HEADER_SIZE]>,
+    data: [WordSize; MAX_BUFFER_SIZE],
 }
+impl ReceiveMessage {}

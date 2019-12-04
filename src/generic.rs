@@ -13,6 +13,7 @@ impl OpCode {
     pub const WRITE_SFR: u16 = 0b0010 << 12;
 }
 
+#[derive(Copy, Clone)]
 pub enum SFRAddress {
     OSC = 0xE00,
     IOCON = 0xE04,
@@ -271,4 +272,9 @@ pub enum SFRAddress {
 
     C1FLTOBJ31 = 0x2E8,
     C1MASK31 = 0x2EC,
+}
+
+pub enum FIFO {
+    Transmit { payload_size: u8, queue_length: u8 },
+    Receive { payload_size: u8, queue_length: u8 },
 }

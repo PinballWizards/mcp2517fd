@@ -1,7 +1,13 @@
 use embedded_hal::digital::v2::{OutputPin, StatefulOutputPin};
 use embedded_hal::spi::FullDuplex;
 
-use super::generic::*;
+use crate::fifo;
+use crate::generic::*;
+
+pub enum Error<T, E> {
+    SPI(T),
+    Other(E),
+}
 
 pub struct Controller<T, SS> {
     spi_master: T,
@@ -42,10 +48,10 @@ where
         }
     }
 
-    pub fn read_sfr(&mut self, address: SFRAddress) -> Result<u32, T::Error> {
+    pub fn read_sfr(&mut self, address: &SFRAddress) -> Result<u32, T::Error> {
         self.ready_slave_select();
         let mut instruction = Instruction(OpCode::READ_SFR);
-        instruction.set_address(address as u16);
+        instruction.set_address(*address as u16);
         match self.send(&instruction.0.to_be_bytes()) {
             Ok(_) => (),
             Err(err) => {
@@ -70,16 +76,129 @@ where
         Ok(read_value)
     }
 
-    pub fn write_sfr(&mut self, address: SFRAddress, value: u32) -> Result<u32, T::Error> {
+    pub fn write_sfr(&mut self, address: &SFRAddress, value: u32) -> Result<u32, T::Error> {
         self.ready_slave_select();
         let mut instruction = Instruction(OpCode::WRITE_SFR);
-        instruction.set_address(address as u16);
+        instruction.set_address(*address as u16);
         let ret = match self.send(&instruction.0.to_be_bytes()) {
             Ok(_) => Ok(value),
             Err(err) => Err(err),
         };
         self.slave_select.set_high().unwrap();
         ret
+    }
+
+    /// Enables the transmit event FIFO by setting C1CON.STEF and C1TEFCON.FSIZE bits.
+    /// Be aware that object_count MUST be <= 31, any other values will be disregarded.
+    ///
+    /// Also please keep in mind that the total RAM size is 2K and this code does absolutely
+    /// zero validation that your configuration is under this limit. The documentation recommends
+    /// configuring the TEF first, then TEQ, then FIFOs as necessary.
+    pub fn enable_transmit_event_fifo(&mut self, object_count: u32) -> Result<(), T::Error> {
+        let mut c1con = match self.read_sfr(&SFRAddress::C1CON) {
+            Ok(val) => val,
+            Err(err) => return Err(err),
+        };
+
+        // Enable TEF
+        c1con |= 1 << 19;
+        match self.write_sfr(&SFRAddress::C1CON, c1con) {
+            Ok(_) => (),
+            Err(err) => return Err(err),
+        };
+
+        let mut c1tefcon = match self.read_sfr(&SFRAddress::C1TEFCON) {
+            Ok(val) => val,
+            Err(err) => return Err(err),
+        };
+
+        // Reserve space in RAM, max 31 objects
+        c1tefcon |= object_count & 0b1111;
+        match self.write_sfr(&SFRAddress::C1TEFCON, c1tefcon) {
+            Ok(_) => Ok(()),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Configures a FIFO based on the settings provided. As per documentation, a single FIFO must
+    /// be dedicated to RX or TX and all objects in that queue must have the same payload size.
+    ///
+    /// fifo_number may be between 1 and 31 inclusive, this function will return Ok(()) if it
+    /// is passed an invalid number.
+    pub fn configure_fifo_control<F>(
+        &mut self,
+        fifo_number: u8,
+        f: F,
+    ) -> Result<(), Error<T::Error, u8>>
+    where
+        F: FnOnce(&mut fifo::ControlRegister) -> &mut fifo::ControlRegister,
+    {
+        let address = match fifo::get_fifo_control_address(fifo_number) {
+            Ok(addr) => addr,
+            Err(e) => return Err(Error::Other(e)),
+        };
+
+        let raw_register: u32 = match self.read_sfr(&address) {
+            Ok(val) => val,
+            Err(err) => return Err(Error::SPI(err)),
+        };
+
+        let mut control_register = fifo::ControlRegister(raw_register);
+
+        match self.write_sfr(&address, f(&mut control_register).0) {
+            Ok(_) => Ok(()),
+            Err(err) => Err(Error::SPI(err)),
+        }
+    }
+
+    pub fn read_fifo_status(
+        &mut self,
+        fifo_number: u8,
+    ) -> Result<fifo::StatusRegister, Error<T::Error, u8>> {
+        let address = match fifo::get_fifo_status_address(fifo_number) {
+            Ok(addr) => addr,
+            Err(e) => return Err(Error::Other(e)),
+        };
+
+        match self.read_sfr(&address) {
+            Ok(val) => Ok(fifo::StatusRegister(val)),
+            Err(err) => Err(Error::SPI(err)),
+        }
+    }
+
+    pub fn write_fifo_status<F>(&mut self, fifo_number: u8, f: F) -> Result<(), Error<T::Error, u8>>
+    where
+        F: FnOnce(&mut fifo::StatusRegister) -> &mut fifo::StatusRegister,
+    {
+        let mut status_register = match self.read_fifo_status(fifo_number) {
+            Ok(reg) => reg,
+            Err(err) => return Err(err),
+        };
+
+        let address = match fifo::get_fifo_status_address(fifo_number) {
+            Ok(val) => val,
+            Err(err) => return Err(Error::Other(err)),
+        };
+
+        match self.write_sfr(&address, f(&mut status_register).0) {
+            Ok(_) => Ok(()),
+            Err(err) => Err(Error::SPI(err)),
+        }
+    }
+
+    pub fn read_fifo_user_address(
+        &mut self,
+        fifo_number: u8,
+    ) -> Result<fifo::UserAddressRegister, Error<T::Error, u8>> {
+        let address = match fifo::get_fifo_status_address(fifo_number) {
+            Ok(val) => val,
+            Err(err) => return Err(Error::Other(err)),
+        };
+
+        match self.read_sfr(&address) {
+            Ok(val) => Ok(fifo::UserAddressRegister(val)),
+            Err(err) => Err(Error::SPI(err)),
+        }
     }
 
     fn read(&mut self) -> Result<u8, T::Error> {
