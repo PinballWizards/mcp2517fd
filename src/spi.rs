@@ -80,12 +80,10 @@ where
         self.ready_slave_select();
         let mut instruction = Instruction(OpCode::WRITE_SFR);
         instruction.set_address(*address as u16);
-        let ret = match self.send(&instruction.0.to_be_bytes()) {
-            Ok(_) => Ok(value),
-            Err(err) => Err(err),
-        };
+        self.send(&instruction.0.to_be_bytes())?;
+        self.send(&value.to_be_bytes())?;
         self.slave_select.set_high().unwrap();
-        ret
+        Ok(value)
     }
 
     /// Enables the transmit event FIFO by setting C1CON.STEF and C1TEFCON.FSIZE bits.
