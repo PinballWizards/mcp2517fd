@@ -102,22 +102,15 @@ where
 
         // Enable TEF
         c1con |= 1 << 19;
-        match self.write_sfr(&SFRAddress::C1CON, c1con) {
-            Ok(_) => (),
-            Err(err) => return Err(err),
-        };
+        self.write_sfr(&SFRAddress::C1CON, c1con)?;
 
-        let mut c1tefcon = match self.read_sfr(&SFRAddress::C1TEFCON) {
-            Ok(val) => val,
-            Err(err) => return Err(err),
-        };
+        let mut c1tefcon = self.read_sfr(&SFRAddress::C1TEFCON)?;
 
         // Reserve space in RAM, max 31 objects
         c1tefcon |= object_count & 0b1111;
-        match self.write_sfr(&SFRAddress::C1TEFCON, c1tefcon) {
-            Ok(_) => Ok(()),
-            Err(err) => Err(err),
-        }
+        self.write_sfr(&SFRAddress::C1TEFCON, c1tefcon)?;
+
+        Ok(())
     }
 
     /// Configures a FIFO based on the settings provided. As per documentation, a single FIFO must
