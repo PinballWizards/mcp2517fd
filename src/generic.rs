@@ -3,7 +3,7 @@ bitfield! {
     impl Debug;
     u16;
     pub op_code, set_op_code: 15, 12;
-    pub address, set_address: 10, 0;
+    pub address, set_address: 11, 0;
 }
 
 pub struct OpCode;
