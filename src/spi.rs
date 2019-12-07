@@ -71,7 +71,7 @@ where
         // Read four bytes back
         for i in 0..4 {
             match self.read() {
-                Ok(val) => read_value |= (val as u32) << 8 * i,
+                Ok(val) => read_value |= (val as u32) << (8 * i),
                 Err(val) => {
                     self.slave_select.set_high().unwrap();
                     return Err(Error::SPIRead(val));
