@@ -1,4 +1,4 @@
-use embedded_hal::blocking::spi::Write;
+use embedded_hal::blocking::spi::{Transfer, Write};
 use embedded_hal::digital::v2::{OutputPin, StatefulOutputPin};
 use embedded_hal::spi::FullDuplex;
 
@@ -18,7 +18,7 @@ pub struct Controller<T, SS> {
 
 impl<T, SS> Controller<T, SS>
 where
-    T: FullDuplex<u8> + Write<u8>,
+    T: FullDuplex<u8> + Write<u8> + Transfer<u8>,
     SS: StatefulOutputPin,
     <SS as OutputPin>::Error: core::fmt::Debug,
 {
@@ -238,8 +238,12 @@ where
         self.write_sfr(&address, f(&mut register).0)
     }
 
-    fn read(&mut self) -> Result<u8, <T as FullDuplex<u8>>::Error> {
-        block!(self.spi_master.read())
+    fn read(&mut self) -> Result<u8, <T as Transfer<u8>>::Error> {
+        let mut buf = [0u8; 1];
+        match self.spi_master.transfer(&mut buf) {
+            Ok(val) => Ok(val[0]),
+            Err(err) => Err(err),
+        }
     }
 
     fn send(&mut self, data: &[u8]) -> Result<(), <T as Write<u8>>::Error> {
