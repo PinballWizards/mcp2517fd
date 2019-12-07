@@ -1,11 +1,13 @@
+use embedded_hal::blocking::spi::Write;
 use embedded_hal::digital::v2::{OutputPin, StatefulOutputPin};
 use embedded_hal::spi::FullDuplex;
 
 use crate::fifo;
 use crate::generic::*;
 
-pub enum Error<T, E> {
-    SPI(T),
+pub enum Error<TR, TW, E> {
+    SPIRead(TR),
+    SPIWrite(TW),
     Other(E),
 }
 
@@ -16,7 +18,7 @@ pub struct Controller<T, SS> {
 
 impl<T, SS> Controller<T, SS>
 where
-    T: FullDuplex<u8>,
+    T: FullDuplex<u8> + Write<u8>,
     SS: StatefulOutputPin,
     <SS as OutputPin>::Error: core::fmt::Debug,
 {
@@ -35,7 +37,9 @@ where
         self.slave_select.set_low().unwrap();
     }
 
-    pub fn reset(&mut self) -> Result<(), T::Error> {
+    pub fn reset(
+        &mut self,
+    ) -> Result<(), Error<<T as FullDuplex<u8>>::Error, <T as Write<u8>>::Error, u8>> {
         self.ready_slave_select();
 
         let instruction = Instruction(OpCode::RESET);
@@ -43,12 +47,15 @@ where
             Ok(_) => Ok(()),
             Err(err) => {
                 self.slave_select.set_low().unwrap();
-                Err(err)
+                Err(Error::SPIWrite(err))
             }
         }
     }
 
-    pub fn read_sfr(&mut self, address: &SFRAddress) -> Result<u32, T::Error> {
+    pub fn read_sfr(
+        &mut self,
+        address: &SFRAddress,
+    ) -> Result<u32, Error<<T as FullDuplex<u8>>::Error, <T as Write<u8>>::Error, u8>> {
         self.ready_slave_select();
         let mut instruction = Instruction(OpCode::READ_SFR);
         instruction.set_address(*address as u16);
@@ -56,7 +63,7 @@ where
             Ok(_) => (),
             Err(err) => {
                 self.slave_select.set_high().unwrap();
-                return Err(err);
+                return Err(Error::SPIWrite(err));
             }
         }
 
@@ -68,7 +75,7 @@ where
                 Ok(val) => read_value |= (val as u32) << 8 * i,
                 Err(val) => {
                     self.slave_select.set_high().unwrap();
-                    return Err(val);
+                    return Err(Error::SPIRead(val));
                 }
             }
         }
@@ -76,14 +83,31 @@ where
         Ok(read_value)
     }
 
-    pub fn write_sfr(&mut self, address: &SFRAddress, value: u32) -> Result<u32, T::Error> {
+    pub fn write_sfr(
+        &mut self,
+        address: &SFRAddress,
+        value: u32,
+    ) -> Result<(), Error<<T as FullDuplex<u8>>::Error, <T as Write<u8>>::Error, u8>> {
         self.ready_slave_select();
         let mut instruction = Instruction(OpCode::WRITE_SFR);
         instruction.set_address(*address as u16);
-        self.send(&instruction.0.to_be_bytes())?;
-        self.send(&value.to_be_bytes())?;
+        match self.send(&instruction.0.to_be_bytes()) {
+            Ok(_) => (),
+            Err(err) => {
+                self.slave_select.set_high().unwrap();
+                return Err(Error::SPIWrite(err));
+            }
+        }
+
+        match self.send(&value.to_be_bytes()) {
+            Ok(_) => (),
+            Err(err) => {
+                self.slave_select.set_high().unwrap();
+                return Err(Error::SPIWrite(err));
+            }
+        }
         self.slave_select.set_high().unwrap();
-        Ok(value)
+        Ok(())
     }
 
     /// Enables the transmit event FIFO by setting C1CON.STEF and C1TEFCON.FSIZE bits.
@@ -92,11 +116,11 @@ where
     /// Also please keep in mind that the total RAM size is 2K and this code does absolutely
     /// zero validation that your configuration is under this limit. The documentation recommends
     /// configuring the TEF first, then TEQ, then FIFOs as necessary.
-    pub fn enable_transmit_event_fifo(&mut self, object_count: u32) -> Result<(), T::Error> {
-        let mut c1con = match self.read_sfr(&SFRAddress::C1CON) {
-            Ok(val) => val,
-            Err(err) => return Err(err),
-        };
+    pub fn enable_transmit_event_fifo(
+        &mut self,
+        object_count: u32,
+    ) -> Result<(), Error<<T as FullDuplex<u8>>::Error, <T as Write<u8>>::Error, u8>> {
+        let mut c1con = self.read_sfr(&SFRAddress::C1CON)?;
 
         // Enable TEF
         c1con |= 1 << 19;
@@ -120,7 +144,7 @@ where
         &mut self,
         fifo_number: u8,
         f: F,
-    ) -> Result<(), Error<T::Error, u8>>
+    ) -> Result<(), Error<<T as FullDuplex<u8>>::Error, <T as Write<u8>>::Error, u8>>
     where
         F: FnOnce(&mut fifo::ControlRegister) -> &mut fifo::ControlRegister,
     {
@@ -129,23 +153,20 @@ where
             Err(e) => return Err(Error::Other(e)),
         };
 
-        let raw_register: u32 = match self.read_sfr(&address) {
-            Ok(val) => val,
-            Err(err) => return Err(Error::SPI(err)),
-        };
+        let raw_register: u32 = self.read_sfr(&address)?;
 
         let mut control_register = fifo::ControlRegister(raw_register);
 
-        match self.write_sfr(&address, f(&mut control_register).0) {
-            Ok(_) => Ok(()),
-            Err(err) => Err(Error::SPI(err)),
-        }
+        self.write_sfr(&address, f(&mut control_register).0)
     }
 
     pub fn read_fifo_status(
         &mut self,
         fifo_number: u8,
-    ) -> Result<fifo::StatusRegister, Error<T::Error, u8>> {
+    ) -> Result<
+        fifo::StatusRegister,
+        Error<<T as FullDuplex<u8>>::Error, <T as Write<u8>>::Error, u8>,
+    > {
         let address = match fifo::get_fifo_status_address(fifo_number) {
             Ok(addr) => addr,
             Err(e) => return Err(Error::Other(e)),
@@ -153,11 +174,15 @@ where
 
         match self.read_sfr(&address) {
             Ok(val) => Ok(fifo::StatusRegister(val)),
-            Err(err) => Err(Error::SPI(err)),
+            Err(err) => Err(err),
         }
     }
 
-    pub fn write_fifo_status<F>(&mut self, fifo_number: u8, f: F) -> Result<(), Error<T::Error, u8>>
+    pub fn write_fifo_status<F>(
+        &mut self,
+        fifo_number: u8,
+        f: F,
+    ) -> Result<(), Error<<T as FullDuplex<u8>>::Error, <T as Write<u8>>::Error, u8>>
     where
         F: FnOnce(&mut fifo::StatusRegister) -> &mut fifo::StatusRegister,
     {
@@ -171,16 +196,16 @@ where
             Err(err) => return Err(Error::Other(err)),
         };
 
-        match self.write_sfr(&address, f(&mut status_register).0) {
-            Ok(_) => Ok(()),
-            Err(err) => Err(Error::SPI(err)),
-        }
+        self.write_sfr(&address, f(&mut status_register).0)
     }
 
     pub fn read_fifo_user_address(
         &mut self,
         fifo_number: u8,
-    ) -> Result<fifo::UserAddressRegister, Error<T::Error, u8>> {
+    ) -> Result<
+        fifo::UserAddressRegister,
+        Error<<T as FullDuplex<u8>>::Error, <T as Write<u8>>::Error, u8>,
+    > {
         let address = match fifo::get_fifo_status_address(fifo_number) {
             Ok(val) => val,
             Err(err) => return Err(Error::Other(err)),
@@ -188,7 +213,7 @@ where
 
         match self.read_sfr(&address) {
             Ok(val) => Ok(fifo::UserAddressRegister(val)),
-            Err(err) => Err(Error::SPI(err)),
+            Err(err) => Err(err),
         }
     }
 
@@ -196,7 +221,7 @@ where
         &mut self,
         fifo_number: u8,
         f: F,
-    ) -> Result<(), Error<T::Error, u8>>
+    ) -> Result<(), Error<<T as FullDuplex<u8>>::Error, <T as Write<u8>>::Error, u8>>
     where
         F: FnOnce(&mut fifo::UserAddressRegister) -> fifo::UserAddressRegister,
     {
@@ -207,22 +232,18 @@ where
 
         let mut register = match self.read_sfr(&address) {
             Ok(val) => fifo::UserAddressRegister(val),
-            Err(err) => return Err(Error::SPI(err)),
+            Err(err) => return Err(err),
         };
 
-        match self.write_sfr(&address, f(&mut register).0) {
-            Ok(_) => Ok(()),
-            Err(err) => Err(Error::SPI(err)),
-        }
+        self.write_sfr(&address, f(&mut register).0)
     }
 
-    fn read(&mut self) -> Result<u8, T::Error> {
+    fn read(&mut self) -> Result<u8, <T as FullDuplex<u8>>::Error> {
         block!(self.spi_master.read())
     }
 
-    fn send(&mut self, data: &[u8]) -> Result<(), <T as FullDuplex<u8>>::Error> {
-        data.iter()
-            .try_for_each(|v| block!(self.spi_master.send(*v)))
+    fn send(&mut self, data: &[u8]) -> Result<(), <T as Write<u8>>::Error> {
+        self.spi_master.write(data)
     }
 
     pub fn free(mut self) -> (T, SS) {
