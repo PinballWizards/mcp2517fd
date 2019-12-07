@@ -1,6 +1,5 @@
 use embedded_hal::blocking::spi::{Transfer, Write};
 use embedded_hal::digital::v2::{OutputPin, StatefulOutputPin};
-use embedded_hal::spi::FullDuplex;
 
 use crate::fifo;
 use crate::generic::*;
@@ -18,7 +17,7 @@ pub struct Controller<T, SS> {
 
 impl<T, SS> Controller<T, SS>
 where
-    T: FullDuplex<u8> + Write<u8> + Transfer<u8>,
+    T: Write<u8> + Transfer<u8>,
     SS: StatefulOutputPin,
     <SS as OutputPin>::Error: core::fmt::Debug,
 {
@@ -39,7 +38,7 @@ where
 
     pub fn reset(
         &mut self,
-    ) -> Result<(), Error<<T as FullDuplex<u8>>::Error, <T as Write<u8>>::Error, u8>> {
+    ) -> Result<(), Error<<T as Transfer<u8>>::Error, <T as Write<u8>>::Error, u8>> {
         self.ready_slave_select();
 
         let instruction = Instruction(OpCode::RESET);
@@ -55,7 +54,7 @@ where
     pub fn read_sfr(
         &mut self,
         address: &SFRAddress,
-    ) -> Result<u32, Error<<T as FullDuplex<u8>>::Error, <T as Write<u8>>::Error, u8>> {
+    ) -> Result<u32, Error<<T as Transfer<u8>>::Error, <T as Write<u8>>::Error, u8>> {
         self.ready_slave_select();
         let mut instruction = Instruction(OpCode::READ_SFR);
         instruction.set_address(*address as u16);
@@ -87,7 +86,7 @@ where
         &mut self,
         address: &SFRAddress,
         value: u32,
-    ) -> Result<(), Error<<T as FullDuplex<u8>>::Error, <T as Write<u8>>::Error, u8>> {
+    ) -> Result<(), Error<<T as Transfer<u8>>::Error, <T as Write<u8>>::Error, u8>> {
         self.ready_slave_select();
         let mut instruction = Instruction(OpCode::WRITE_SFR);
         instruction.set_address(*address as u16);
@@ -119,7 +118,7 @@ where
     pub fn enable_transmit_event_fifo(
         &mut self,
         object_count: u32,
-    ) -> Result<(), Error<<T as FullDuplex<u8>>::Error, <T as Write<u8>>::Error, u8>> {
+    ) -> Result<(), Error<<T as Transfer<u8>>::Error, <T as Write<u8>>::Error, u8>> {
         let mut c1con = self.read_sfr(&SFRAddress::C1CON)?;
 
         // Enable TEF
@@ -144,7 +143,7 @@ where
         &mut self,
         fifo_number: u8,
         f: F,
-    ) -> Result<(), Error<<T as FullDuplex<u8>>::Error, <T as Write<u8>>::Error, u8>>
+    ) -> Result<(), Error<<T as Transfer<u8>>::Error, <T as Write<u8>>::Error, u8>>
     where
         F: FnOnce(&mut fifo::ControlRegister) -> &mut fifo::ControlRegister,
     {
@@ -163,10 +162,8 @@ where
     pub fn read_fifo_status(
         &mut self,
         fifo_number: u8,
-    ) -> Result<
-        fifo::StatusRegister,
-        Error<<T as FullDuplex<u8>>::Error, <T as Write<u8>>::Error, u8>,
-    > {
+    ) -> Result<fifo::StatusRegister, Error<<T as Transfer<u8>>::Error, <T as Write<u8>>::Error, u8>>
+    {
         let address = match fifo::get_fifo_status_address(fifo_number) {
             Ok(addr) => addr,
             Err(e) => return Err(Error::Other(e)),
@@ -182,7 +179,7 @@ where
         &mut self,
         fifo_number: u8,
         f: F,
-    ) -> Result<(), Error<<T as FullDuplex<u8>>::Error, <T as Write<u8>>::Error, u8>>
+    ) -> Result<(), Error<<T as Transfer<u8>>::Error, <T as Write<u8>>::Error, u8>>
     where
         F: FnOnce(&mut fifo::StatusRegister) -> &mut fifo::StatusRegister,
     {
@@ -204,7 +201,7 @@ where
         fifo_number: u8,
     ) -> Result<
         fifo::UserAddressRegister,
-        Error<<T as FullDuplex<u8>>::Error, <T as Write<u8>>::Error, u8>,
+        Error<<T as Transfer<u8>>::Error, <T as Write<u8>>::Error, u8>,
     > {
         let address = match fifo::get_fifo_status_address(fifo_number) {
             Ok(val) => val,
@@ -221,7 +218,7 @@ where
         &mut self,
         fifo_number: u8,
         f: F,
-    ) -> Result<(), Error<<T as FullDuplex<u8>>::Error, <T as Write<u8>>::Error, u8>>
+    ) -> Result<(), Error<<T as Transfer<u8>>::Error, <T as Write<u8>>::Error, u8>>
     where
         F: FnOnce(&mut fifo::UserAddressRegister) -> fifo::UserAddressRegister,
     {
