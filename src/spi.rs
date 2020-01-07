@@ -98,7 +98,9 @@ where
             }
         }
 
-        match self.send(&value.to_be_bytes()) {
+        // The "instruction" needs to be converted to BE bytes but the actual SFR register
+        // needs to be in LE format!!!
+        match self.send(&value.to_le_bytes()) {
             Ok(_) => (),
             Err(err) => {
                 self.slave_select.set_high().unwrap();
