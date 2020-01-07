@@ -2,8 +2,8 @@ bitfield! {
     pub struct Instruction(u16);
     impl Debug;
     u16;
-    pub op_code, set_op_code: 15, 12;
-    pub address, set_address: 11, 0;
+    pub op_code, set_op_code: 3, 0;
+    pub address, set_address: 15, 4;
 }
 
 pub struct OpCode;
