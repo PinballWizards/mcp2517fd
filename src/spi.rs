@@ -58,7 +58,7 @@ where
         self.ready_slave_select();
         let mut instruction = Instruction(OpCode::READ_SFR);
         instruction.set_address(*address as u16);
-        match self.send(&instruction.0.to_be_bytes()) {
+        match self.send(&instruction.0.to_le_bytes()) {
             Ok(_) => (),
             Err(err) => {
                 self.slave_select.set_high().unwrap();
@@ -90,7 +90,7 @@ where
         self.ready_slave_select();
         let mut instruction = Instruction(OpCode::WRITE_SFR);
         instruction.set_address(*address as u16);
-        match self.send(&instruction.0.to_be_bytes()) {
+        match self.send(&instruction.0.to_le_bytes()) {
             Ok(_) => (),
             Err(err) => {
                 self.slave_select.set_high().unwrap();
