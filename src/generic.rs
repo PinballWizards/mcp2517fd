@@ -8,9 +8,9 @@ bitfield! {
 
 pub struct OpCode;
 impl OpCode {
-    pub const RESET: u16 = 0b0000 << 12;
-    pub const READ_SFR: u16 = 0b0011 << 12;
-    pub const WRITE_SFR: u16 = 0b0010 << 12;
+    pub const RESET: u16 = 0b0000;
+    pub const READ_SFR: u16 = 0b0011;
+    pub const WRITE_SFR: u16 = 0b0010;
 }
 
 #[derive(Copy, Clone)]
