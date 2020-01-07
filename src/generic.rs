@@ -2,15 +2,15 @@ bitfield! {
     pub struct Instruction(u16);
     impl Debug;
     u16;
-    pub op_code, set_op_code: 3, 0;
-    pub address, set_address: 15, 4;
+    pub op_code, set_op_code: 15, 12;
+    pub address, set_address: 11, 0;
 }
 
 pub struct OpCode;
 impl OpCode {
-    pub const RESET: u16 = 0b0000;
-    pub const READ_SFR: u16 = 0b0011;
-    pub const WRITE_SFR: u16 = 0b0010;
+    pub const RESET: u16 = 0b0000 << 12;
+    pub const READ_SFR: u16 = 0b0011 << 12;
+    pub const WRITE_SFR: u16 = 0b0010 << 12;
 }
 
 #[derive(Copy, Clone)]
