@@ -22,7 +22,7 @@ where
     <SS as OutputPin>::Error: core::fmt::Debug,
 {
     pub fn new(spi_master: T, mut slave_select: SS) -> Controller<T, SS> {
-        slave_select.set_low().unwrap();
+        slave_select.set_high().unwrap();
         Self {
             spi_master,
             slave_select,
