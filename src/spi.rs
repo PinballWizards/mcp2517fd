@@ -45,7 +45,7 @@ where
         match self.send(&instruction.0.to_be_bytes()) {
             Ok(_) => Ok(()),
             Err(err) => {
-                self.slave_select.set_low().unwrap();
+                self.slave_select.set_high().unwrap();
                 Err(Error::SPIWrite(err))
             }
         }
