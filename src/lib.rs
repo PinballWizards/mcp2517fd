@@ -10,3 +10,5 @@ pub mod fifo;
 pub mod generic;
 pub mod message;
 pub mod spi;
+pub mod settings;
+pub mod can;

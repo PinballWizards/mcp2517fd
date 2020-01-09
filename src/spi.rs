@@ -1,13 +1,21 @@
+use embedded_hal::blocking::delay::DelayUs;
 use embedded_hal::blocking::spi::{Transfer, Write};
 use embedded_hal::digital::v2::{OutputPin, StatefulOutputPin};
+use nb;
 
+use crate::can;
 use crate::fifo;
 use crate::generic::*;
+use crate::settings::Settings;
 
-pub enum Error<TR, TW, E> {
-    SPIRead(TR),
-    SPIWrite(TW),
-    Other(E),
+pub enum Error {
+    SPIRead,
+    SPIWrite,
+    Other,
+}
+
+pub enum ConfigError {
+    ConfigurationModeTimeout,
 }
 
 pub struct Controller<T, SS> {
@@ -29,6 +37,46 @@ where
         }
     }
 
+    pub fn configure<D: DelayUs<u32>>(
+        &mut self,
+        settings: Settings,
+        delay: &mut D,
+    ) -> Result<(), ConfigError> {
+        // I'm going to borrow the ordering and logic for this code from pierremolinaro
+        // on github: https://github.com/pierremolinaro/acan2517
+
+        let mut c1con = match self.read_sfr(&SFRAddress::C1CON) {
+            Ok(val) => can::control::C1CON(val),
+            Err(_) => return Err(ConfigError::ConfigurationModeTimeout),
+        };
+        c1con.set_opmode(can::control::OperationMode::Configuration);
+        match self.write_sfr(&SFRAddress::C1CON, c1con.0) {
+            Ok(_) => (),
+            Err(_) => return Err(ConfigError::ConfigurationModeTimeout),
+        };
+
+        // Delay 2ms checking every 500us for config mode
+        for i in 0..5 {
+            if c1con.opmode() == can::control::OperationMode::Configuration {
+                break;
+            } else if i == 4 {
+                return Err(ConfigError::ConfigurationModeTimeout);
+            }
+            delay.delay_us(500u32);
+            c1con = match self.read_sfr(&SFRAddress::C1CON) {
+                Ok(val) => can::control::C1CON(val),
+                Err(_) => can::control::C1CON(0),
+            };
+        }
+
+        // Now in configuration mode --------------------
+
+        // Verify SPI connection is working by writing to an available ram location
+        for i in 0..32 {}
+
+        Ok(())
+    }
+
     fn ready_slave_select(&mut self) -> () {
         if self.slave_select.is_set_low().unwrap() {
             self.slave_select.set_high().unwrap();
@@ -36,79 +84,53 @@ where
         self.slave_select.set_low().unwrap();
     }
 
-    pub fn reset(
-        &mut self,
-    ) -> Result<(), Error<<T as Transfer<u8>>::Error, <T as Write<u8>>::Error, u8>> {
+    pub fn reset(&mut self) -> Result<(), Error> {
         self.ready_slave_select();
 
         let instruction = Instruction(OpCode::RESET);
         match self.send(&instruction.0.to_be_bytes()) {
             Ok(_) => Ok(()),
-            Err(err) => {
+            Err(_) => {
                 self.slave_select.set_high().unwrap();
-                Err(Error::SPIWrite(err))
+                Err(Error::SPIWrite)
             }
         }
     }
 
-    pub fn read_sfr(
-        &mut self,
-        address: &SFRAddress,
-    ) -> Result<u32, Error<<T as Transfer<u8>>::Error, <T as Write<u8>>::Error, u8>> {
+    pub fn read_sfr(&mut self, address: &SFRAddress) -> Result<u32, Error> {
         self.ready_slave_select();
         let mut instruction = Instruction(OpCode::READ_SFR);
         instruction.set_address(*address as u16);
         match self.send(&instruction.0.to_be_bytes()) {
             Ok(_) => (),
-            Err(err) => {
+            Err(e) => {
                 self.slave_select.set_high().unwrap();
-                return Err(Error::SPIWrite(err));
+                return Err(e);
             }
         }
 
-        let mut read_value: u32 = 0;
-
-        // Read four bytes back
-        for i in 0..4 {
-            match self.read() {
-                Ok(val) => read_value |= (val as u32) << (8 * i),
-                Err(val) => {
-                    self.slave_select.set_high().unwrap();
-                    return Err(Error::SPIRead(val));
-                }
-            }
-        }
+        let read_value = self.read32();
         self.slave_select.set_high().unwrap();
-        Ok(read_value)
+        read_value
     }
 
-    pub fn write_sfr(
-        &mut self,
-        address: &SFRAddress,
-        value: u32,
-    ) -> Result<(), Error<<T as Transfer<u8>>::Error, <T as Write<u8>>::Error, u8>> {
+    pub fn write_sfr(&mut self, address: &SFRAddress, value: u32) -> Result<(), Error> {
         self.ready_slave_select();
         let mut instruction = Instruction(OpCode::WRITE_SFR);
         instruction.set_address(*address as u16);
         match self.send(&instruction.0.to_be_bytes()) {
             Ok(_) => (),
-            Err(err) => {
+            Err(e) => {
                 self.slave_select.set_high().unwrap();
-                return Err(Error::SPIWrite(err));
+                return Err(e);
             }
         }
 
         // The "instruction" needs to be converted to BE bytes but the actual SFR register
         // needs to be in LE format!!!
-        match self.send(&value.to_le_bytes()) {
-            Ok(_) => (),
-            Err(err) => {
-                self.slave_select.set_high().unwrap();
-                return Err(Error::SPIWrite(err));
-            }
-        }
+        let ret = self.send(&value.to_le_bytes());
         self.slave_select.set_high().unwrap();
-        Ok(())
+        ret
     }
 
     /// Enables the transmit event FIFO by setting C1CON.STEF and C1TEFCON.FSIZE bits.
@@ -117,10 +139,7 @@ where
     /// Also please keep in mind that the total RAM size is 2K and this code does absolutely
     /// zero validation that your configuration is under this limit. The documentation recommends
     /// configuring the TEF first, then TEQ, then FIFOs as necessary.
-    pub fn enable_transmit_event_fifo(
-        &mut self,
-        object_count: u32,
-    ) -> Result<(), Error<<T as Transfer<u8>>::Error, <T as Write<u8>>::Error, u8>> {
+    pub fn enable_transmit_event_fifo(&mut self, object_count: u32) -> Result<(), Error> {
         let mut c1con = self.read_sfr(&SFRAddress::C1CON)?;
 
         // Enable TEF
@@ -141,17 +160,13 @@ where
     ///
     /// fifo_number may be between 1 and 31 inclusive, this function will return Ok(()) if it
     /// is passed an invalid number.
-    pub fn configure_fifo_control<F>(
-        &mut self,
-        fifo_number: u8,
-        f: F,
-    ) -> Result<(), Error<<T as Transfer<u8>>::Error, <T as Write<u8>>::Error, u8>>
+    pub fn configure_fifo_control<F>(&mut self, fifo_number: u8, f: F) -> Result<(), Error>
     where
         F: FnOnce(&mut fifo::ControlRegister) -> &mut fifo::ControlRegister,
     {
         let address = match fifo::get_fifo_control_address(fifo_number) {
             Ok(addr) => addr,
-            Err(e) => return Err(Error::Other(e)),
+            Err(_) => return Err(Error::Other),
         };
 
         let raw_register: u32 = self.read_sfr(&address)?;
@@ -161,14 +176,10 @@ where
         self.write_sfr(&address, f(&mut control_register).0)
     }
 
-    pub fn read_fifo_status(
-        &mut self,
-        fifo_number: u8,
-    ) -> Result<fifo::StatusRegister, Error<<T as Transfer<u8>>::Error, <T as Write<u8>>::Error, u8>>
-    {
+    pub fn read_fifo_status(&mut self, fifo_number: u8) -> Result<fifo::StatusRegister, Error> {
         let address = match fifo::get_fifo_status_address(fifo_number) {
             Ok(addr) => addr,
-            Err(e) => return Err(Error::Other(e)),
+            Err(_) => return Err(Error::Other),
         };
 
         match self.read_sfr(&address) {
@@ -177,11 +188,7 @@ where
         }
     }
 
-    pub fn write_fifo_status<F>(
-        &mut self,
-        fifo_number: u8,
-        f: F,
-    ) -> Result<(), Error<<T as Transfer<u8>>::Error, <T as Write<u8>>::Error, u8>>
+    pub fn write_fifo_status<F>(&mut self, fifo_number: u8, f: F) -> Result<(), Error>
     where
         F: FnOnce(&mut fifo::StatusRegister) -> &mut fifo::StatusRegister,
     {
@@ -192,7 +199,7 @@ where
 
         let address = match fifo::get_fifo_status_address(fifo_number) {
             Ok(val) => val,
-            Err(err) => return Err(Error::Other(err)),
+            Err(_) => return Err(Error::Other),
         };
 
         self.write_sfr(&address, f(&mut status_register).0)
@@ -201,13 +208,10 @@ where
     pub fn read_fifo_user_address(
         &mut self,
         fifo_number: u8,
-    ) -> Result<
-        fifo::UserAddressRegister,
-        Error<<T as Transfer<u8>>::Error, <T as Write<u8>>::Error, u8>,
-    > {
+    ) -> Result<fifo::UserAddressRegister, Error> {
         let address = match fifo::get_fifo_status_address(fifo_number) {
             Ok(val) => val,
-            Err(err) => return Err(Error::Other(err)),
+            Err(_) => return Err(Error::Other),
         };
 
         match self.read_sfr(&address) {
@@ -216,17 +220,13 @@ where
         }
     }
 
-    pub fn write_fifo_user_address<F>(
-        &mut self,
-        fifo_number: u8,
-        f: F,
-    ) -> Result<(), Error<<T as Transfer<u8>>::Error, <T as Write<u8>>::Error, u8>>
+    pub fn write_fifo_user_address<F>(&mut self, fifo_number: u8, f: F) -> Result<(), Error>
     where
         F: FnOnce(&mut fifo::UserAddressRegister) -> fifo::UserAddressRegister,
     {
         let address = match fifo::get_fifo_status_address(fifo_number) {
             Ok(val) => val,
-            Err(err) => return Err(Error::Other(err)),
+            Err(_) => return Err(Error::Other),
         };
 
         let mut register = match self.read_sfr(&address) {
@@ -237,16 +237,19 @@ where
         self.write_sfr(&address, f(&mut register).0)
     }
 
-    fn read(&mut self) -> Result<u8, <T as Transfer<u8>>::Error> {
-        let mut buf = [0u8; 1];
+    fn read32(&mut self) -> Result<u32, Error> {
+        let mut buf = [0u8; 4];
         match self.spi_master.transfer(&mut buf) {
-            Ok(val) => Ok(val[0]),
-            Err(err) => Err(err),
+            Ok(_) => Ok(u32::from_le_bytes(buf)),
+            Err(_) => Err(Error::SPIRead),
         }
     }
 
-    fn send(&mut self, data: &[u8]) -> Result<(), <T as Write<u8>>::Error> {
-        self.spi_master.write(data)
+    fn send(&mut self, data: &[u8]) -> Result<(), Error> {
+        match self.spi_master.write(data) {
+            Ok(_) => Ok(()),
+            Err(_) => Err(Error::SPIWrite),
+        }
     }
 
     pub fn free(mut self) -> (T, SS) {

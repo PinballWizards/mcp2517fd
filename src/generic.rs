@@ -278,3 +278,16 @@ pub enum FIFO {
     Transmit { payload_size: u8, queue_length: u8 },
     Receive { payload_size: u8, queue_length: u8 },
 }
+
+bitfield! {
+    pub struct OSCRegister(u32);
+    impl Debug;
+    u8;
+    pub pllen, set_pllen: 0;
+    pub oscdis, set_oscdis: 2;
+    pub slckdiv, set_slckdiv: 4;
+    pub clkodiv, set_clkodiv: 6, 5;
+    pub pllrdy, _: 8;
+    pub oscrdy, _: 10;
+    pub sclkrdy, _: 12;
+}
