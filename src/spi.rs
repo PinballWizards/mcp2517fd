@@ -98,42 +98,6 @@ where
         }
     }
 
-    pub fn read_sfr(&mut self, address: &SFRAddress) -> Result<u32, Error> {
-        self.ready_slave_select();
-        let mut instruction = Instruction(OpCode::READ_SFR);
-        instruction.set_address(*address as u16);
-        match self.send(&instruction.0.to_be_bytes()) {
-            Ok(_) => (),
-            Err(e) => {
-                self.slave_select.set_high().unwrap();
-                return Err(e);
-            }
-        }
-
-        let read_value = self.read32();
-        self.slave_select.set_high().unwrap();
-        read_value
-    }
-
-    pub fn write_sfr(&mut self, address: &SFRAddress, value: u32) -> Result<(), Error> {
-        self.ready_slave_select();
-        let mut instruction = Instruction(OpCode::WRITE_SFR);
-        instruction.set_address(*address as u16);
-        match self.send(&instruction.0.to_be_bytes()) {
-            Ok(_) => (),
-            Err(e) => {
-                self.slave_select.set_high().unwrap();
-                return Err(e);
-            }
-        }
-
-        // The "instruction" needs to be converted to BE bytes but the actual SFR register
-        // needs to be in LE format!!!
-        let ret = self.send(&value.to_le_bytes());
-        self.slave_select.set_high().unwrap();
-        ret
-    }
-
     /// Enables the transmit event FIFO by setting C1CON.STEF and C1TEFCON.FSIZE bits.
     /// Be aware that object_count MUST be <= 31, any other values will be disregarded.
     ///
@@ -251,6 +215,42 @@ where
             Ok(_) => Ok(()),
             Err(_) => Err(Error::SPIWrite),
         }
+    }
+
+    pub fn read_sfr(&mut self, address: &SFRAddress) -> Result<u32, Error> {
+        self.ready_slave_select();
+        let mut instruction = Instruction(OpCode::READ_SFR);
+        instruction.set_address(*address as u16);
+        match self.send(&instruction.0.to_be_bytes()) {
+            Ok(_) => (),
+            Err(e) => {
+                self.slave_select.set_high().unwrap();
+                return Err(e);
+            }
+        }
+
+        let read_value = self.read32();
+        self.slave_select.set_high().unwrap();
+        read_value
+    }
+
+    pub fn write_sfr(&mut self, address: &SFRAddress, value: u32) -> Result<(), Error> {
+        self.ready_slave_select();
+        let mut instruction = Instruction(OpCode::WRITE_SFR);
+        instruction.set_address(*address as u16);
+        match self.send(&instruction.0.to_be_bytes()) {
+            Ok(_) => (),
+            Err(e) => {
+                self.slave_select.set_high().unwrap();
+                return Err(e);
+            }
+        }
+
+        // The "instruction" needs to be converted to BE bytes but the actual SFR register
+        // needs to be in LE format!!!
+        let ret = self.send(&value.to_le_bytes());
+        self.slave_select.set_high().unwrap();
+        ret
     }
 
     pub fn free(mut self) -> (T, SS) {
