@@ -6,7 +6,7 @@ use embedded_hal::digital::v2::{OutputPin, StatefulOutputPin};
 use crate::can;
 use crate::fifo;
 use crate::generic::*;
-use crate::settings::Settings;
+use crate::settings::{Settings, SysClkDivider, PLL};
 
 pub enum Error {
     SPIRead,
@@ -18,6 +18,18 @@ pub enum Error {
 
 pub enum ConfigError {
     ConfigurationModeTimeout,
+    SPIFailedRAMEcho,
+    PLLNotReady,
+    Other(Error),
+}
+
+impl From<Error> for ConfigError {
+    fn from(error: Error) -> Self {
+        match error {
+            Error::SPIRead | Error::SPIWrite => ConfigError::ConfigurationModeTimeout,
+            _ => ConfigError::Other(error),
+        }
+    }
 }
 
 pub struct Controller<T, SS> {
@@ -74,7 +86,53 @@ where
         // Now in configuration mode --------------------
 
         // Verify SPI connection is working by writing to an available ram location
-        for i in 0..32 {}
+        // lowest available ram address
+        let address = 0x400;
+        for i in 0..32 {
+            let data: u32 = 1 << i;
+            self.write_ram(address, &data.to_le_bytes())?;
+
+            let mut read_back_buf = [0u8; 4];
+            self.read_ram(address, &mut read_back_buf)?;
+            let read_back_value = u32::from_le_bytes(read_back_buf);
+            if read_back_value != data {
+                return Err(ConfigError::SPIFailedRAMEcho);
+            }
+        }
+
+        // SPI comms determined OK, now set OSC registers
+        let mut osc = OSCRegister(self.read_sfr(&SFRAddress::OSC)?);
+        match settings.oscillator.pll {
+            PLL::On => osc.set_pllen(true),
+            PLL::Off => osc.set_pllen(false),
+        }
+
+        match settings.oscillator.divider {
+            SysClkDivider::DivByOne => osc.set_slckdiv(false),
+            SysClkDivider::DivByTwo => osc.set_slckdiv(true),
+        }
+
+        osc.set_oscdis(false);
+
+        self.write_sfr(&SFRAddress::OSC, osc.into())?;
+
+        match settings.oscillator.pll {
+            PLL::On => {
+                // Wait 1 ms for PLL ready
+                for i in 0..3 {
+                    let osc = OSCRegister(self.read_sfr(&SFRAddress::OSC)?);
+                    if osc.pllrdy() {
+                        break;
+                    } else if i == 3 {
+                        return Err(ConfigError::PLLNotReady);
+                    }
+                    delay.delay_us(500u32);
+                }
+            }
+            _ => (),
+        }
+
+        // Setup FIFOs
 
         Ok(())
     }

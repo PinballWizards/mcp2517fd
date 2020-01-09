@@ -3,12 +3,9 @@
 #[macro_use]
 extern crate bitfield;
 
-#[macro_use]
-extern crate nb;
-
+pub mod can;
 pub mod fifo;
 pub mod generic;
 pub mod message;
-pub mod spi;
 pub mod settings;
-pub mod can;
+pub mod spi;

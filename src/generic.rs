@@ -297,3 +297,9 @@ bitfield! {
     pub oscrdy, _: 10;
     pub sclkrdy, _: 12;
 }
+
+impl From<OSCRegister> for u32 {
+    fn from(reg: OSCRegister) -> Self {
+        reg.0
+    }
+}

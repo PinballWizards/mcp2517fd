@@ -9,10 +9,10 @@ pub enum SysClkDivider {
 }
 
 pub struct Oscillator {
-    PLL: PLL,
-    Divider: SysClkDivider,
+    pub pll: PLL,
+    pub divider: SysClkDivider,
 }
 
 pub struct Settings {
-    oscillator: Oscillator,
+    pub oscillator: Oscillator,
 }
