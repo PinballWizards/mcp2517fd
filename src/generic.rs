@@ -6,11 +6,17 @@ bitfield! {
     pub address, set_address: 11, 0;
 }
 
+impl Instruction {
+    pub fn to_spi_data(self) -> [u8; 2] {
+        self.0.to_be_bytes()
+    }
+}
+
 pub struct OpCode;
 impl OpCode {
     pub const RESET: u16 = 0b0000 << 12;
-    pub const READ_SFR: u16 = 0b0011 << 12;
-    pub const WRITE_SFR: u16 = 0b0010 << 12;
+    pub const READ: u16 = 0b0011 << 12;
+    pub const WRITE: u16 = 0b0010 << 12;
 }
 
 #[derive(Copy, Clone)]

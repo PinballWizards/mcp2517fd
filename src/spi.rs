@@ -1,7 +1,7 @@
+use core::cmp::Ord;
 use embedded_hal::blocking::delay::DelayUs;
 use embedded_hal::blocking::spi::{Transfer, Write};
 use embedded_hal::digital::v2::{OutputPin, StatefulOutputPin};
-use nb;
 
 use crate::can;
 use crate::fifo;
@@ -12,6 +12,7 @@ pub enum Error {
     SPIRead,
     SPIWrite,
     InvalidFIFO(u8),
+    InvalidRAMAddress(u16),
     Other,
 }
 
@@ -83,6 +84,10 @@ where
             self.slave_select.set_high().unwrap();
         }
         self.slave_select.set_low().unwrap();
+    }
+
+    fn reset_slave_select(&mut self) {
+        self.slave_select.set_high().unwrap();
     }
 
     pub fn reset(&mut self) -> Result<(), Error> {
@@ -202,12 +207,17 @@ where
         self.write_sfr(&address, f(&mut register).0)
     }
 
-    fn read32(&mut self) -> Result<u32, Error> {
-        let mut buf = [0u8; 4];
-        match self.spi_master.transfer(&mut buf) {
-            Ok(_) => Ok(u32::from_le_bytes(buf)),
+    fn read(&mut self, buf: &mut [u8]) -> Result<(), Error> {
+        match self.spi_master.transfer(buf) {
+            Ok(_) => Ok(()),
             Err(_) => Err(Error::SPIRead),
         }
+    }
+
+    fn read32(&mut self) -> Result<u32, Error> {
+        let mut buf = [0u8; 4];
+        self.read(&mut buf)?;
+        Ok(u32::from_le_bytes(buf))
     }
 
     fn send(&mut self, data: &[u8]) -> Result<(), Error> {
@@ -219,9 +229,9 @@ where
 
     pub fn read_sfr(&mut self, address: &SFRAddress) -> Result<u32, Error> {
         self.ready_slave_select();
-        let mut instruction = Instruction(OpCode::READ_SFR);
+        let mut instruction = Instruction(OpCode::READ);
         instruction.set_address(*address as u16);
-        match self.send(&instruction.0.to_be_bytes()) {
+        match self.send(&instruction.to_spi_data()) {
             Ok(_) => (),
             Err(e) => {
                 self.slave_select.set_high().unwrap();
@@ -236,9 +246,9 @@ where
 
     pub fn write_sfr(&mut self, address: &SFRAddress, value: u32) -> Result<(), Error> {
         self.ready_slave_select();
-        let mut instruction = Instruction(OpCode::WRITE_SFR);
+        let mut instruction = Instruction(OpCode::WRITE);
         instruction.set_address(*address as u16);
-        match self.send(&instruction.0.to_be_bytes()) {
+        match self.send(&instruction.to_spi_data()) {
             Ok(_) => (),
             Err(e) => {
                 self.slave_select.set_high().unwrap();
@@ -251,6 +261,59 @@ where
         let ret = self.send(&value.to_le_bytes());
         self.slave_select.set_high().unwrap();
         ret
+    }
+
+    fn verify_ram_address(&self, address: u16, data_size: usize) -> Result<(), Error> {
+        let low_address = 0x400;
+        let high_address = 0xBFF;
+
+        if address < low_address {
+            return Err(Error::InvalidRAMAddress(address));
+        }
+
+        match (address + data_size as u16).cmp(&high_address) {
+            core::cmp::Ordering::Greater => return Err(Error::InvalidRAMAddress(address)),
+            _ => Ok(()),
+        }
+    }
+
+    pub fn read_ram(&mut self, address: u16, data: &mut [u8]) -> Result<(), Error> {
+        self.verify_ram_address(address, data.len())?;
+        self.ready_slave_select();
+
+        let mut instruction = Instruction(OpCode::READ);
+        instruction.set_address(address);
+
+        match self.send(&instruction.to_spi_data()) {
+            Ok(_) => (),
+            Err(_) => {
+                self.reset_slave_select();
+                return Err(Error::SPIWrite);
+            }
+        }
+
+        let result = self.read(data);
+        self.reset_slave_select();
+        result
+    }
+
+    pub fn write_ram(&mut self, address: u16, data: &[u8]) -> Result<(), Error> {
+        self.verify_ram_address(address, data.len())?;
+
+        let mut instruction = Instruction(OpCode::WRITE);
+        instruction.set_address(address);
+
+        match self.send(&instruction.to_spi_data()) {
+            Ok(_) => (),
+            Err(_) => {
+                self.reset_slave_select();
+                return Err(Error::SPIWrite);
+            }
+        };
+
+        let result = self.send(data);
+        self.reset_slave_select();
+        result
     }
 
     pub fn free(mut self) -> (T, SS) {
