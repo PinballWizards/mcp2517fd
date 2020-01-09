@@ -11,6 +11,7 @@ use crate::settings::Settings;
 pub enum Error {
     SPIRead,
     SPIWrite,
+    InvalidFIFO(u8),
     Other,
 }
 
@@ -166,7 +167,7 @@ where
     {
         let address = match fifo::get_fifo_control_address(fifo_number) {
             Ok(addr) => addr,
-            Err(_) => return Err(Error::Other),
+            Err(e) => return Err(Error::InvalidFIFO(e)),
         };
 
         let raw_register: u32 = self.read_sfr(&address)?;
@@ -179,7 +180,7 @@ where
     pub fn read_fifo_status(&mut self, fifo_number: u8) -> Result<fifo::StatusRegister, Error> {
         let address = match fifo::get_fifo_status_address(fifo_number) {
             Ok(addr) => addr,
-            Err(_) => return Err(Error::Other),
+            Err(e) => return Err(Error::InvalidFIFO(e)),
         };
 
         match self.read_sfr(&address) {
@@ -199,7 +200,7 @@ where
 
         let address = match fifo::get_fifo_status_address(fifo_number) {
             Ok(val) => val,
-            Err(_) => return Err(Error::Other),
+            Err(e) => return Err(Error::InvalidFIFO(e)),
         };
 
         self.write_sfr(&address, f(&mut status_register).0)
@@ -211,7 +212,7 @@ where
     ) -> Result<fifo::UserAddressRegister, Error> {
         let address = match fifo::get_fifo_status_address(fifo_number) {
             Ok(val) => val,
-            Err(_) => return Err(Error::Other),
+            Err(e) => return Err(Error::InvalidFIFO(e)),
         };
 
         match self.read_sfr(&address) {
@@ -226,7 +227,7 @@ where
     {
         let address = match fifo::get_fifo_status_address(fifo_number) {
             Ok(val) => val,
-            Err(_) => return Err(Error::Other),
+            Err(e) => return Err(Error::InvalidFIFO(e)),
         };
 
         let mut register = match self.read_sfr(&address) {
