@@ -79,6 +79,7 @@ where
         Ok(())
     }
 
+    /// Ready slave select will pull the slave select line to ACTIVE.
     fn ready_slave_select(&mut self) -> () {
         if self.slave_select.is_set_low().unwrap() {
             self.slave_select.set_high().unwrap();
@@ -86,10 +87,12 @@ where
         self.slave_select.set_low().unwrap();
     }
 
+    /// Reset slave select will pull the slave select line to INACTIVE.
     fn reset_slave_select(&mut self) {
         self.slave_select.set_high().unwrap();
     }
 
+    /// Performs a software reset of the MCP2517 chip over SPI.
     pub fn reset(&mut self) -> Result<(), Error> {
         self.ready_slave_select();
 
@@ -234,13 +237,13 @@ where
         match self.send(&instruction.to_spi_data()) {
             Ok(_) => (),
             Err(e) => {
-                self.slave_select.set_high().unwrap();
+                self.reset_slave_select();
                 return Err(e);
             }
         }
 
         let read_value = self.read32();
-        self.slave_select.set_high().unwrap();
+        self.reset_slave_select();
         read_value
     }
 
@@ -251,7 +254,7 @@ where
         match self.send(&instruction.to_spi_data()) {
             Ok(_) => (),
             Err(e) => {
-                self.slave_select.set_high().unwrap();
+                self.reset_slave_select();
                 return Err(e);
             }
         }
@@ -259,7 +262,7 @@ where
         // The "instruction" needs to be converted to BE bytes but the actual SFR register
         // needs to be in LE format!!!
         let ret = self.send(&value.to_le_bytes());
-        self.slave_select.set_high().unwrap();
+        self.reset_slave_select();
         ret
     }
 
@@ -299,6 +302,7 @@ where
 
     pub fn write_ram(&mut self, address: u16, data: &[u8]) -> Result<(), Error> {
         self.verify_ram_address(address, data.len())?;
+        self.ready_slave_select();
 
         let mut instruction = Instruction(OpCode::WRITE);
         instruction.set_address(address);
