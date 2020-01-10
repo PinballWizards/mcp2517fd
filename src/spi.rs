@@ -121,28 +121,26 @@ where
 
         // Setup IOCON -------------------------------------------
 
-        let mut iocon = IOCONRegister(self.read_sfr(&SFRAddress::IOCON)?);
-
-        iocon.set_xstbyen(settings.ioconfiguration.enable_tx_standby_pin);
-        iocon.set_txcanod(settings.ioconfiguration.txcan_open_drain);
-        iocon.set_sof(settings.ioconfiguration.sof_on_clko);
-        iocon.set_intod(settings.ioconfiguration.interrupt_pin_open_drain);
-
-        self.write_sfr(&SFRAddress::IOCON, iocon.into())?;
+        self.modify_sfr(IOCONRegister, |mut iocon| {
+            iocon.set_xstbyen(settings.ioconfiguration.enable_tx_standby_pin);
+            iocon.set_txcanod(settings.ioconfiguration.txcan_open_drain);
+            iocon.set_sof(settings.ioconfiguration.sof_on_clko);
+            iocon.set_intod(settings.ioconfiguration.interrupt_pin_open_drain);
+            iocon
+        })?;
 
         // Setup Transmission Queue ------------------------------
 
-        let mut c1txqcon = can::control::C1TXQCON(self.read_sfr(&SFRAddress::C1TXQCON)?);
-
-        c1txqcon.set_retransmission_attempts(settings.txqueue.retransmission_attempts);
-        c1txqcon.set_txpri(settings.txqueue.message_priority);
         let uses_txq = settings.txqueue.fifo_size > 0;
-        if uses_txq {
-            c1txqcon.set_fifo_size(settings.txqueue.fifo_size);
-            c1txqcon.set_payload_size(settings.txqueue.payload_size);
-        }
-
-        self.write_sfr(&SFRAddress::C1TXQCON, c1txqcon.into())?;
+        self.modify_sfr(can::control::C1TXQCON, |mut c1txqcon| {
+            c1txqcon.set_retransmission_attempts(settings.txqueue.retransmission_attempts);
+            c1txqcon.set_txpri(settings.txqueue.message_priority);
+            if uses_txq {
+                c1txqcon.set_fifo_size(settings.txqueue.fifo_size);
+                c1txqcon.set_payload_size(settings.txqueue.payload_size);
+            }
+            c1txqcon
+        })?;
 
         if uses_txq {
             let mut c1con = can::control::C1CON(self.read_sfr(&SFRAddress::C1CON)?);
