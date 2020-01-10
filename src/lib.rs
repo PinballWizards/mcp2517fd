@@ -4,7 +4,6 @@
 extern crate bitfield;
 
 pub mod can;
-pub mod fifo;
 pub mod generic;
 pub mod message;
 pub mod settings;

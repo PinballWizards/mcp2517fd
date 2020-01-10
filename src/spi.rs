@@ -4,9 +4,9 @@ use embedded_hal::blocking::spi::{Transfer, Write};
 use embedded_hal::digital::v2::{OutputPin, StatefulOutputPin};
 
 use crate::can;
-use crate::fifo;
+use crate::can::fifo;
 use crate::generic::*;
-use crate::settings::{Settings, SysClkDivider, PLL};
+use crate::settings;
 
 pub enum Error {
     SPIRead,
@@ -53,7 +53,7 @@ where
 
     pub fn configure<D: DelayUs<u32>>(
         &mut self,
-        settings: Settings,
+        settings: settings::Settings,
         delay: &mut D,
     ) -> Result<(), ConfigError> {
         // I'm going to borrow the ordering and logic for this code from pierremolinaro
@@ -103,13 +103,13 @@ where
         // SPI comms determined OK, now set OSC registers
         let mut osc = OSCRegister(self.read_sfr(&SFRAddress::OSC)?);
         match settings.oscillator.pll {
-            PLL::On => osc.set_pllen(true),
-            PLL::Off => osc.set_pllen(false),
+            settings::PLL::On => osc.set_pllen(true),
+            settings::PLL::Off => osc.set_pllen(false),
         }
 
         match settings.oscillator.divider {
-            SysClkDivider::DivByOne => osc.set_slckdiv(false),
-            SysClkDivider::DivByTwo => osc.set_slckdiv(true),
+            settings::SysClkDivider::DivByOne => osc.set_slckdiv(false),
+            settings::SysClkDivider::DivByTwo => osc.set_slckdiv(true),
         }
 
         osc.set_oscdis(false);
@@ -117,7 +117,7 @@ where
         self.write_sfr(&SFRAddress::OSC, osc.into())?;
 
         match settings.oscillator.pll {
-            PLL::On => {
+            settings::PLL::On => {
                 // Wait 1 ms for PLL ready
                 for i in 0..3 {
                     let osc = OSCRegister(self.read_sfr(&SFRAddress::OSC)?);
@@ -132,7 +132,40 @@ where
             _ => (),
         }
 
-        // Setup FIFOs
+        // Setup IOCON -------------------------------------------
+
+        let mut iocon = IOCONRegister(self.read_sfr(&SFRAddress::IOCON)?);
+
+        iocon.set_xstbyen(settings.ioconfiguration.enable_tx_standby_pin);
+        iocon.set_txcanod(settings.ioconfiguration.txcan_open_drain);
+        iocon.set_sof(settings.ioconfiguration.sof_on_clko);
+        iocon.set_intod(settings.ioconfiguration.interrupt_pin_open_drain);
+
+        self.write_sfr(&SFRAddress::IOCON, iocon.into())?;
+
+        // Setup Transmission Queue ------------------------------
+
+        let mut c1txqcon = can::control::C1TXQCON(self.read_sfr(&SFRAddress::C1TXQCON)?);
+
+        c1txqcon.set_retransmission_attempts(settings.txqueue.retransmission_attempts);
+        c1txqcon.set_txpri(settings.txqueue.message_priority);
+        let uses_txq = settings.txqueue.fifo_size > 0;
+        if uses_txq {
+            c1txqcon.set_fifo_size(settings.txqueue.fifo_size);
+            c1txqcon.set_payload_size(settings.txqueue.payload_size);
+        }
+
+        self.write_sfr(&SFRAddress::C1TXQCON, c1txqcon.into())?;
+
+        if uses_txq {
+            let mut c1con = can::control::C1CON(self.read_sfr(&SFRAddress::C1CON)?);
+            if c1con.txqen() != uses_txq {
+                // Disable TXQ and TEF if we don't want to store transmit queue
+                c1con.set_txqen(uses_txq);
+                c1con.set_stef(false);
+                self.write_sfr(&SFRAddress::C1CON, c1con.into())?;
+            }
+        }
 
         Ok(())
     }

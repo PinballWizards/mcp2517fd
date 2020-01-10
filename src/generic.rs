@@ -303,3 +303,27 @@ impl From<OSCRegister> for u32 {
         reg.0
     }
 }
+
+bitfield! {
+    pub struct IOCONRegister(u32);
+    impl Debug;
+    u8;
+    pub tris0, set_tris0: 0;
+    pub tris1, set_tris1: 1;
+    pub xstbyen, set_xstbyen: 6;
+    pub lat0, set_lat0: 8;
+    pub lat1, set_lat1: 9;
+    pub gpio0, _: 16;
+    pub gpio1, _: 17;
+    pub pm0, set_pm0: 24;
+    pub pm1, set_pm1: 25;
+    pub txcanod, set_txcanod: 28;
+    pub sof, set_sof: 29;
+    pub intod, set_intod: 30;
+}
+
+impl From<IOCONRegister> for u32 {
+    fn from(reg: IOCONRegister) -> Self {
+        reg.0
+    }
+}
