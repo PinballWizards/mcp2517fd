@@ -1,4 +1,5 @@
 pub mod control {
+    use crate::generic::{Register, SFRAddress};
     use core::convert::TryFrom;
     use num_enum::{IntoPrimitive, TryFromPrimitive, TryFromPrimitiveError};
 
@@ -64,6 +65,12 @@ pub mod control {
         _, _set_reqop: 26, 24;
         pub abat, set_abat: 27;
         _txbws, _set_txbws: 31, 28;
+    }
+
+    impl Register for C1CON {
+        fn address() -> SFRAddress {
+            SFRAddress::C1CON
+        }
     }
 
     impl From<C1CON> for u32 {
@@ -185,6 +192,12 @@ pub mod control {
 
         pub fn set_payload_size(&mut self, size: PayloadSize) {
             self._set_plsize(size.into());
+        }
+    }
+
+    impl Register for C1TXQCON {
+        fn address() -> SFRAddress {
+            SFRAddress::C1TXQCON
         }
     }
 

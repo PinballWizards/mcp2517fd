@@ -285,6 +285,10 @@ pub enum FIFO {
     Receive { payload_size: u8, queue_length: u8 },
 }
 
+pub trait Register {
+    fn address() -> SFRAddress;
+}
+
 bitfield! {
     pub struct OSCRegister(u32);
     impl Debug;
@@ -301,6 +305,12 @@ bitfield! {
 impl From<OSCRegister> for u32 {
     fn from(reg: OSCRegister) -> Self {
         reg.0
+    }
+}
+
+impl Register for OSCRegister {
+    fn address() -> SFRAddress {
+        SFRAddress::OSC
     }
 }
 
@@ -325,5 +335,11 @@ bitfield! {
 impl From<IOCONRegister> for u32 {
     fn from(reg: IOCONRegister) -> Self {
         reg.0
+    }
+}
+
+impl Register for IOCONRegister {
+    fn address() -> SFRAddress {
+        SFRAddress::IOCON
     }
 }

@@ -85,36 +85,23 @@ where
 
         // Now in configuration mode --------------------
 
-        // Verify SPI connection is working by writing to an available ram location
-        // lowest available ram address
-        let address = 0x400;
-        for i in 0..32 {
-            let data: u32 = 1 << i;
-            self.write_ram(address, &data.to_le_bytes())?;
-
-            let mut read_back_buf = [0u8; 4];
-            self.read_ram(address, &mut read_back_buf)?;
-            let read_back_value = u32::from_le_bytes(read_back_buf);
-            if read_back_value != data {
-                return Err(ConfigError::SPIFailedRAMEcho);
-            }
-        }
+        self.verify_spi_communications()?;
 
         // SPI comms determined OK, now set OSC registers
-        let mut osc = OSCRegister(self.read_sfr(&SFRAddress::OSC)?);
-        match settings.oscillator.pll {
-            settings::PLL::On => osc.set_pllen(true),
-            settings::PLL::Off => osc.set_pllen(false),
-        }
+        self.modify_sfr(OSCRegister, |mut osc| {
+            match settings.oscillator.pll {
+                settings::PLL::On => osc.set_pllen(true),
+                settings::PLL::Off => osc.set_pllen(false),
+            }
 
-        match settings.oscillator.divider {
-            settings::SysClkDivider::DivByOne => osc.set_slckdiv(false),
-            settings::SysClkDivider::DivByTwo => osc.set_slckdiv(true),
-        }
+            match settings.oscillator.divider {
+                settings::SysClkDivider::DivByOne => osc.set_slckdiv(false),
+                settings::SysClkDivider::DivByTwo => osc.set_slckdiv(true),
+            }
 
-        osc.set_oscdis(false);
-
-        self.write_sfr(&SFRAddress::OSC, osc.into())?;
+            osc.set_oscdis(false);
+            osc
+        })?;
 
         match settings.oscillator.pll {
             settings::PLL::On => {
@@ -195,6 +182,19 @@ where
                 Err(Error::SPIWrite)
             }
         }
+    }
+
+    /// Helper method for modifying the OSC register.
+    pub fn modify_osc<F: FnOnce(OSCRegister) -> OSCRegister>(&mut self, f: F) -> Result<(), Error> {
+        self.modify_sfr(OSCRegister, f)
+    }
+
+    /// Helper method for modifying the IOCON register.
+    pub fn modify_iocon<F: FnOnce(IOCONRegister) -> IOCONRegister>(
+        &mut self,
+        f: F,
+    ) -> Result<(), Error> {
+        self.modify_sfr(IOCONRegister, f)
     }
 
     /// Enables the transmit event FIFO by setting C1CON.STEF and C1TEFCON.FSIZE bits.
@@ -301,6 +301,23 @@ where
         self.write_sfr(&address, f(&mut register).0)
     }
 
+    /// Verify SPI connection is working by writing to an available ram location.
+    pub fn verify_spi_communications(&mut self) -> Result<(), ConfigError> {
+        let address = 0x400;
+        for i in 0..32 {
+            let data: u32 = 1 << i;
+            self.write_ram(address, &data.to_le_bytes())?;
+
+            let mut read_back_buf = [0u8; 4];
+            self.read_ram(address, &mut read_back_buf)?;
+            let read_back_value = u32::from_le_bytes(read_back_buf);
+            if read_back_value != data {
+                return Err(ConfigError::SPIFailedRAMEcho);
+            }
+        }
+        Ok(())
+    }
+
     fn read(&mut self, buf: &mut [u8]) -> Result<(), Error> {
         match self.spi_master.transfer(buf) {
             Ok(_) => Ok(()),
@@ -355,6 +372,16 @@ where
         let ret = self.send(&value.to_le_bytes());
         self.reset_slave_select();
         ret
+    }
+
+    /// Helper method for quickly doing read modify write on SFR registers.
+    pub fn modify_sfr<V: Register + Into<u32>, R: FnOnce(u32) -> V, F: FnOnce(V) -> V>(
+        &mut self,
+        r: R,
+        f: F,
+    ) -> Result<(), Error> {
+        let reg = r(self.read_sfr(&V::address())?);
+        self.write_sfr(&V::address(), f(reg).into())
     }
 
     fn verify_ram_address(&self, address: u16, data_size: usize) -> Result<(), Error> {
